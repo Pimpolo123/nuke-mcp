@@ -61,27 +61,24 @@ def test_server_has_tools(server):
     assert "subscribe_events" in tool_names
 
 
-def test_server_plain_nuke_no_nukex_tools():
-    """Verify NukeX-only tools are not registered for plain Nuke."""
+def test_server_plain_nuke_keeps_nukex_tools():
+    """NukeX tools stay registered: the user may switch to a NukeX session later."""
     port = _find_free_port()
     mcp = build_server(port=port, mock=True, mock_version="17.0v1", mock_variant="Nuke")
     tool_names = _get_tool_names(mcp)
-    # NukeX tools should NOT be present
-    assert "create_tracker" not in tool_names
-    assert "setup_copycat" not in tool_names
-    assert "setup_deep_pipeline" not in tool_names
-    # But base tools should still be there
+    assert "create_tracker" in tool_names
+    assert "setup_copycat" in tool_names
+    assert "setup_deep_pipeline" in tool_names
     assert "get_script_info" in tool_names
-    assert "setup_keyer" in tool_names
+    assert "list_nuke_instances" in tool_names
+    assert "select_nuke_instance" in tool_names
 
 
-def test_server_old_version_no_17_tools():
-    """Verify Nuke 17+ tools are not registered for older versions."""
+def test_server_old_version_keeps_17_tools():
+    """Nuke 17 tools stay registered: the user may switch to a Nuke 17 session later."""
     port = _find_free_port()
     mcp = build_server(port=port, mock=True, mock_version="15.1v3", mock_variant="NukeX")
     tool_names = _get_tool_names(mcp)
-    # Nuke 17+ tools should NOT be present
-    assert "import_splat" not in tool_names
-    assert "create_annotation" not in tool_names
-    # But NukeX tools for older versions should be
+    assert "import_splat" in tool_names
+    assert "create_annotation" in tool_names
     assert "create_tracker" in tool_names

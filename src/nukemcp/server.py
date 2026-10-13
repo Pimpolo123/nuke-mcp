@@ -11,9 +11,9 @@ import sys
 
 from fastmcp import FastMCP
 
-from nukemcp.connection import NukeConnection, DEFAULT_HOST, DEFAULT_PORT
+from nukemcp.connection import NukeConnection, NukeConnectionError, DEFAULT_HOST, DEFAULT_PORT
 from nukemcp.version import NukeVersion, parse_version
-from nukemcp.tools import graph, script, comp, render, templates, batch, tracking, threed, deep, ml, splats, annotations
+from nukemcp.tools import graph, script, comp, render, templates, batch, tracking, threed, deep, ml, splats, annotations, instances
 
 log = logging.getLogger("nukemcp")
 
@@ -57,20 +57,34 @@ def build_server(
 
     conn = NukeConnection(host, port)
 
+    # Nuke may not be open yet; the connection is made lazily on first use.
     try:
-        handshake = conn.connect()
-    except Exception:
+        handshake = conn.ensure_connected()
+        connected = parse_version(handshake)
+        log.info("Connected to %s", connected)
+    except NukeConnectionError as e:
         if mock_server:
             mock_server.stop()
-        raise
+            raise
+        connected = None
+        log.warning("%s Tools will connect when Nuke is available.", e)
 
-    version = parse_version(handshake)
-    log.info("Connected to %s", version)
+    # Tools are gated once at startup, but the user can switch to another
+    # (possibly newer) Nuke later, so gate on the most capable variant.
+    version = NukeVersion(major=max(17, connected.major if connected else 0),
+                          minor=0, patch="v0", variant="NukeX")
 
+    status = (
+        f"You are connected to {connected} (port {conn.port}). "
+        if connected else "No Nuke session was open when this server started. "
+    )
     mcp = FastMCP(
         "NukeMCP",
         instructions=(
-            f"You are connected to {version}. "
+            status
+            + "Several Nuke sessions can be open at once: use list_nuke_instances "
+            "to see them and select_nuke_instance to switch which one the tools act on. "
+            "Some tools need NukeX or Nuke 17 and fail on other sessions. "
             "Use the available tools to inspect and modify the Nuke script. "
             "Always check the current state with get_script_info or get_node_info "
             "before making changes. Never delete nodes or execute code without "
@@ -93,6 +107,7 @@ def build_server(
     ml.register(server)
     splats.register(server)
     annotations.register(server)
+    instances.register(server)
 
     # Register non-tool modules (memory, rag, events, resources, prompts)
     from nukemcp import memory, rag, events, resources, prompts
@@ -108,6 +123,8 @@ def build_server(
 
     # Auto-populate project memory on connection
     try:
+        if not connected:
+            raise NukeConnectionError("not connected")
         info = conn.send_command("get_script_info")
         script_name = info.get("name", "untitled")
         # Derive a clean project name from the script filename

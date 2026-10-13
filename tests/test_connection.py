@@ -37,10 +37,40 @@ def test_send_reconnects_after_drop(connection):
     assert connection.is_connected
 
 
-def test_send_raises_when_addon_unreachable(mock_port):
-    """mock_port is free but unserved — nothing is listening on it."""
-    from nukemcp.connection import NukeConnection
-
-    conn = NukeConnection("127.0.0.1", mock_port)
-    with pytest.raises(NukeConnectionError, match="Failed to connect"):
+def test_send_not_connected(monkeypatch):
+    from nukemcp import connection
+    # Don't let the lazy connect find a real Nuke running on this machine
+    monkeypatch.setattr(connection, "scan_instances", lambda *a, **k: [])
+    conn = connection.NukeConnection(port=1)
+    with pytest.raises(NukeConnectionError, match="No Nuke addon found"):
         conn.send({"type": "ping"})
+
+
+def _free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_scan_and_switch_between_instances():
+    from nukemcp.connection import NukeConnection, scan_instances
+    from nukemcp.mock import MockNukeServer
+
+    port_a, port_b = _free_port(), _free_port()
+    a = MockNukeServer(port=port_a, nuke_version="16.0v6", variant="NukeX")
+    b = MockNukeServer(port=port_b, nuke_version="17.0v4", variant="NukeX")
+    a.start()
+    b.start()
+    try:
+        assert scan_instances("127.0.0.1", port_a, 1)[0]["nuke_version"] == "16.0v6"
+        assert scan_instances("127.0.0.1", port_b, 1)[0]["nuke_version"] == "17.0v4"
+
+        conn = NukeConnection("127.0.0.1", port_a)
+        assert conn.ensure_connected()["nuke_version"] == "16.0v6"
+        assert conn.switch(port_b)["nuke_version"] == "17.0v4"
+        assert "name" in conn.send_command("get_script_info")
+        conn.disconnect()
+    finally:
+        a.stop()
+        b.stop()

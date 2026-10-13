@@ -21,6 +21,7 @@ import threading
 log = logging.getLogger("NukeMCP")
 
 DEFAULT_PORT = 54321
+PORT_RANGE = 10  # one port per running Nuke session: 54321-54330
 
 # ---------------------------------------------------------------------------
 # PySide import (PySide6 for Nuke 16+, PySide2 fallback)
@@ -74,6 +75,7 @@ def _handshake_data() -> dict:
         "nuke_version": version,
         "variant": variant,
         "pid": __import__("os").getpid(),
+        "script": nuke.root().name(),
     }
 
 
@@ -703,6 +705,7 @@ class NukeMCPServer:
     def start(self):
         if self._running:
             return
+        self._bind()
         self._running = True
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
@@ -743,12 +746,36 @@ class NukeMCPServer:
             self._server_sock = None
         log.info("NukeMCP server stopped")
 
+    def _bind(self):
+        """Bind to the first free port in [port, port + PORT_RANGE).
+
+        Several Nuke sessions can run at once; each one takes its own port so
+        the MCP server can list them and switch between them.
+        """
+        last_error = None
+        for port in range(self.port, self.port + PORT_RANGE):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                # Windows: SO_REUSEADDR would let two Nukes bind the same port
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError as e:
+                last_error = e
+                sock.close()
+                continue
+            sock.settimeout(1.0)
+            sock.listen(5)
+            self.port = port
+            self._server_sock = sock
+            return
+        raise OSError(
+            f"No free port in {self.port}-{self.port + PORT_RANGE - 1}: {last_error}"
+        )
+
     def _serve(self):
-        self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._server_sock.settimeout(1.0)
-        self._server_sock.bind(("127.0.0.1", self.port))
-        self._server_sock.listen(8)
         self._emit_log(f"Listening on port {self.port}")
 
         while self._running:
@@ -897,7 +924,13 @@ class NukeMCPPanel(QWidget):
         else:
             self._server = NukeMCPServer(self._port)
             self._server.on_log.connect(self._append_log)
-            self._server.start()
+            try:
+                self._server.start()
+            except OSError as e:
+                self._server = None
+                self._append_log(f"Could not start server: {e}")
+                return
+            self._port_label.setText(f"Port: {self._server.port}")
             self._status_label.setText("Running")
             self._toggle_btn.setText("Stop")
 
@@ -922,13 +955,17 @@ class NukeMCPPanel(QWidget):
 _panel = None
 
 
-def start(port: int = DEFAULT_PORT):
-    """Start the NukeMCP server and show the panel. Call from menu.py or Script Editor."""
+def start(port: int = DEFAULT_PORT, show_panel: bool = True):
+    """Start the NukeMCP server and show the panel. Call from menu.py or Script Editor.
+
+    show_panel=False starts it silently (for auto-start at Nuke launch).
+    """
     global _panel
     if _panel is None:
         _panel = NukeMCPPanel(port=port)
-    _panel.show()
-    _panel.raise_()
+    if show_panel:
+        _panel.show()
+        _panel.raise_()
     # Auto-start the server
     if not (_panel._server and _panel._server._running):
         _panel._toggle_server()

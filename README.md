@@ -16,6 +16,8 @@
 
 NukeMCP connects AI assistants (Claude, ChatGPT, local LLMs) to a running Nuke session via the [Model Context Protocol](https://modelcontextprotocol.io). Describe what you want in plain English, and the AI creates, connects, and configures nodes in your comp.
 
+> **Fork of [kleer001/nuke-mcp](https://github.com/kleer001/nuke-mcp)** with support for several Nuke sessions at once (see [Multiple Nuke Sessions](#multiple-nuke-sessions)) and a fix for the addon closing the connection before the handshake.
+
 ## Status
 
 **Production-ready.** Verified end-to-end against Nuke 17.0v1. Full test suite with CI, lint, and coverage. See the [roadmap](docs/ROADMAP.md) for what's next.
@@ -26,12 +28,12 @@ NukeMCP connects AI assistants (Claude, ChatGPT, local LLMs) to a running Nuke s
 
 **Linux / macOS:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/kleer001/nuke-mcp/main/scripts/bootstrap.sh | bash
+curl -sSL https://raw.githubusercontent.com/PABLOHERTA/nuke-mcp/main/scripts/bootstrap.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-powershell -c "irm https://raw.githubusercontent.com/kleer001/nuke-mcp/main/scripts/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
+powershell -c "irm https://raw.githubusercontent.com/PABLOHERTA/nuke-mcp/main/scripts/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
 ```
 
 The bootstrap clones the repo, installs [uv](https://docs.astral.sh/uv/), creates a venv, installs deps, and prints next steps for the Nuke addon and MCP client.
@@ -42,7 +44,7 @@ The bootstrap clones the repo, installs [uv](https://docs.astral.sh/uv/), create
 #### 1. Clone and install
 
 ```bash
-git clone https://github.com/kleer001/nuke-mcp.git
+git clone https://github.com/PABLOHERTA/nuke-mcp.git
 cd nuke-mcp
 uv sync
 ```
@@ -57,14 +59,16 @@ cp nuke_addon/nuke_mcp_addon.py ~/.nuke/
 
 Or add the `nuke_addon/` directory to your `NUKE_PATH`.
 
-Launch Nuke — in the Script Editor, run:
+To start the server automatically in every Nuke session, also copy `nuke_addon/menu.py` to `~/.nuke/` (or append its contents to your existing `menu.py`). **Nodes > NukeMCP > Show Panel** shows the port and log.
+
+Or start it by hand — in the Script Editor, run:
 
 ```python
 import nuke_mcp_addon
 nuke_mcp_addon.start()
 ```
 
-A **NukeMCP** panel appears with Start/Stop button and log. The server listens on port 54321.
+A **NukeMCP** panel appears with Start/Stop button and log. The server listens on the first free port in 54321–54330.
 
 #### 3. Configure Your MCP Client
 
@@ -86,6 +90,15 @@ A **NukeMCP** panel appears with Start/Stop button and log. The server listens o
 **Other MCP clients (ChatGPT, local LLMs):** Any client that supports stdio transport works. Use the same command/args pattern above, or wrap the server in an HTTP bridge for remote clients.
 
 </details>
+
+## Multiple Nuke Sessions
+
+Several Nukes can be open at once. Each one's addon takes its own port (54321, 54322, … up to 54330), and the addon accepts several MCP clients at the same time (e.g. Claude Desktop and Claude Code).
+
+- `list_nuke_instances` — lists running sessions with version, PID and open script.
+- `select_nuke_instance` — switches all tools to another session, by `port` or by part of the script path (`script="0040"`).
+
+The MCP server can start before Nuke: it connects on first use, and if the Nuke it was using is closed it moves to another running one. NukeX- and Nuke 17-only tools are always registered so they're available after switching; they error on sessions that don't support them.
 
 ## Headless Mode
 

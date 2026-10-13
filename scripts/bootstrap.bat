@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set REPO=https://github.com/kleer001/nuke-mcp.git
+set REPO=https://github.com/PABLOHERTA/nuke-mcp.git
 set DIR=nuke-mcp
 
 echo === NukeMCP Bootstrap ===

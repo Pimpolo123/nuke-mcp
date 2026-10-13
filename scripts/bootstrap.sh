@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="https://github.com/kleer001/nuke-mcp.git"
+REPO="https://github.com/PABLOHERTA/nuke-mcp.git"
 DIR="nuke-mcp"
 
 echo "=== NukeMCP Bootstrap ==="
