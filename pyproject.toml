@@ -1,6 +1,6 @@
 [project]
 name = "nuke-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for Foundry Nuke — AI copilot for compositors"
 readme = "README.md"
 license = "MIT"
@@ -20,9 +20,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kleer001/nuke-mcp"
-Repository = "https://github.com/kleer001/nuke-mcp"
-Issues = "https://github.com/kleer001/nuke-mcp/issues"
+Homepage = "https://github.com/darvosis/nuke-mcp"
+Repository = "https://github.com/darvosis/nuke-mcp"
+Issues = "https://github.com/darvosis/nuke-mcp/issues"
 
 [dependency-groups]
 dev = [

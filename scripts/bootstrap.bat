@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set REPO=https://github.com/PABLOHERTA/nuke-mcp.git
+set REPO=https://github.com/darvosis/nuke-mcp.git
 set DIR=nuke-mcp
 
 echo === NukeMCP Bootstrap ===
@@ -29,7 +29,7 @@ echo === Done ===
 echo.
 echo Next steps:
 echo   1. Copy the Nuke addon:
-echo        copy nuke_addon\nuke_mcp_addon.py %%USERPROFILE%%\.nuke\
+echo        xcopy /E /I nuke_addon\nuke_mcp_addon %%USERPROFILE%%\.nuke\nuke_mcp_addon
 echo.
 echo   2. In Nuke's Script Editor:
 echo        import nuke_mcp_addon; nuke_mcp_addon.start()

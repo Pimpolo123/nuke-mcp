@@ -25,10 +25,33 @@ Three-layer system:
 
 ## Before Making Changes
 
-- Call `get_script_info` to understand the current state
-- Call `get_node_info` on relevant nodes before modifying them
+- Call `get_script_info` to understand the current state (`scene_digest` for a compact overview)
+- Call `get_node_info` on relevant nodes before modifying them (`non_default_only=True` keeps it short)
 - Never assume what nodes exist — always check first
 - Read error messages carefully; they tell you what went wrong
+
+## Reading vs Changing
+
+- To read or compute anything, use `query_python`: every change it makes is rolled back,
+  so it needs no confirmation. A single expression returns its value.
+- To change the script, use the dedicated tools, `batch` (several steps, one undo) or
+  `execute_python` (confirm first). Every change is one undo step labelled `MCP: ...`.
+- A failed command is rolled back completely — retrying never leaves half-built graphs.
+- Code that touches files or processes is blocked by the safety scan; pass
+  `allow_unsafe=True` only after the user agreed to those exact lines.
+- `undo_agent_session` (after `undo_history`) undoes only your own steps.
+
+## Check Your Work Visually
+
+- After building or changing a setup, look at the result with `render_node_preview`
+  (pixels of any node at any frame through the viewer's display transform; raw for
+  data passes) instead of assuming it worked.
+- `capture_screen` shows the node graph, viewer or properties panel.
+
+## Several Nuke Sessions
+
+- `list_nuke_instances` / `select_nuke_instance`. Replies to changes include
+  `session.script` — make sure it is the script the user means.
 
 ## Node Naming
 

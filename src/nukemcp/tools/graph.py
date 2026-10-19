@@ -194,7 +194,8 @@ def register(server: NukeMCPServer):
         blocked = _blocked(code, allow_unsafe)
         if blocked:
             return blocked
-        return conn.send_command("query_python", {"code": code}, timeout=timeout_seconds)
+        return conn.send({"type": "query_python", "params": {"code": code}},
+                         timeout=timeout_seconds)
 
     @mcp.tool(annotations={"destructiveHint": True})
     def execute_python(
@@ -239,6 +240,8 @@ def register(server: NukeMCPServer):
         blocked = _blocked(code, allow_unsafe)
         if blocked:
             return blocked
-        return conn.send_command("execute_python", {
+        # The full reply (status, result, stdout/stderr, failing line, rolled_back,
+        # session) — `result` can be any JSON value, and errors keep their details.
+        return conn.send({"type": "execute_python", "params": {
             "code": code, "atomic": atomic, "persist": persist, "reset": reset_session,
-        }, timeout=timeout_seconds)
+        }}, timeout=timeout_seconds)

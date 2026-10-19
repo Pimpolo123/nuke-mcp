@@ -56,7 +56,7 @@ my_module.register(server)
 
 If your tool uses a new addon command (not just `create_node`/`connect_nodes`), add a handler to both:
 
-- **`nuke_addon/nuke_mcp_addon.py`** — the real Nuke handler (add `_handle_my_command` and register in `COMMANDS`)
+- **`nuke_addon/nuke_mcp_addon/handlers/`** — the real Nuke handlers: a function decorated with `@command("my_command", undo=True)` for changes (one atomic undo step) or `@command("my_command")` for read-only commands
 - **`src/nukemcp/mock.py`** — the mock handler (add `_cmd_my_command` to `MockNukeState`)
 
 ### 4. Write tests

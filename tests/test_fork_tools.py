@@ -98,8 +98,10 @@ def test_new_tools_registered(mcp):
 
 def test_query_python_forwards(mcp):
     data = payload(call(mcp, "query_python", {"code": "nuke.root().name()"}))
-    assert data["echo"] == "query_python"
-    assert data["params"]["code"] == "nuke.root().name()"
+    # Code tools return the whole addon reply, so `result` may be any JSON value.
+    assert data["status"] == "ok"
+    assert data["result"]["echo"] == "query_python"
+    assert data["result"]["params"]["code"] == "nuke.root().name()"
 
 
 def test_query_python_blocks_unsafe(mcp):

@@ -1,6 +1,6 @@
 """Nuke menu integration for NukeMCP.
 
-Place this file (and nuke_mcp_addon.py) in your .nuke directory or NUKE_PATH.
+Place this file and the nuke_mcp_addon folder in your .nuke directory or NUKE_PATH.
 If you already have a menu.py, append the block below to it instead.
 
 The server starts automatically in every GUI Nuke session. Each session takes

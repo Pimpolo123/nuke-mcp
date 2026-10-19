@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="https://github.com/PABLOHERTA/nuke-mcp.git"
+REPO="https://github.com/darvosis/nuke-mcp.git"
 DIR="nuke-mcp"
 
 echo "=== NukeMCP Bootstrap ==="
@@ -31,7 +31,7 @@ echo "=== Done ==="
 echo ""
 echo "Next steps:"
 echo "  1. Copy the Nuke addon:"
-echo "       cp nuke_addon/nuke_mcp_addon.py ~/.nuke/"
+echo "       cp -r nuke_addon/nuke_mcp_addon ~/.nuke/"
 echo ""
 echo "  2. In Nuke's Script Editor:"
 echo "       import nuke_mcp_addon; nuke_mcp_addon.start()"

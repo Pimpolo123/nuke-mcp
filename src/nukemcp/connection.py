@@ -96,7 +96,9 @@ def scan_instances(
                 info.pop("commands", None)
                 found.append({"port": port, **info})
         except (OSError, ValueError):
-            found.append({"port": port, "busy": True})
+            found.append({"port": port, "busy": True,
+                          "note": "no NukeMCP handshake: a Nuke busy rendering/blocked by a "
+                                  "dialog, or another tool listening on this port"})
         finally:
             try:
                 sock.close()
@@ -250,7 +252,12 @@ class NukeConnection:
         """Send a command and return the result, raising on error."""
         response = self.send({"type": cmd_type, "params": params or {}}, timeout=timeout)
         if response["status"] == "error":
-            raise RuntimeError(response["error"])
+            message = response["error"]
+            if response.get("rolled_back") is True:
+                message += " (rolled back: the script was left unchanged)"
+            elif response.get("rolled_back"):
+                message += " (partially rolled back: %s)" % response["rolled_back"]
+            raise RuntimeError(message)
         return response["result"]
 
     def disconnect(self):
