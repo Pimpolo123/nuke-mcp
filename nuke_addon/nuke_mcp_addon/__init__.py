@@ -29,6 +29,10 @@ def __getattr__(name):
     if name == "NukeMCPPanel":
         from .panel import NukeMCPPanel
         return NukeMCPPanel
+    # 0.1 compatibility: in-Nuke tools counted connected clients through this name.
+    if name == "_event_client_sockets":
+        from . import events
+        return events._clients
     raise AttributeError(name)
 
 
