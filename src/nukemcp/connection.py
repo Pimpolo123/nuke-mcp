@@ -279,7 +279,7 @@ class NukeConnection:
     def _reset(self):
         """Tear down the socket, reader thread, and any stale buffered state."""
         self._reader_running = False
-        # Close first: this unblocks the reader thread's blocking recv().
+        # Shut down first: this unblocks the reader thread's blocking recv().
         self._close_socket()
         thread = self._reader_thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
@@ -325,6 +325,14 @@ class NukeConnection:
 
     def _close_socket(self):
         if self.sock:
+            try:
+                # shutdown() is what wakes a recv() blocked in the reader thread and
+                # sends the FIN now. close() alone does that on Windows only: on
+                # Linux/macOS the peer would keep a half-open connection until the
+                # reader exits, which never happens.
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 self.sock.close()
             except OSError:
