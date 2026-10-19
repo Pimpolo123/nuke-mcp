@@ -87,23 +87,39 @@ class NukeConnection:
         )
 
     def send(self, command: dict, timeout: float = 10.0) -> dict:
-        """Send a JSON command and return the JSON response."""
-        if not self.sock:
-            raise NukeConnectionError("Not connected to Nuke addon")
+        """Send a JSON command and return the JSON response.
 
+        Reconnects transparently if the addon dropped the socket since the last
+        command. Without this, a single drop leaves the connection unusable for
+        the lifetime of the server process, and every tool fails until it is
+        restarted.
+        """
         msg = json.dumps(command) + "\n"
-        try:
-            self.sock.sendall(msg.encode("utf-8"))
-        except OSError as e:
-            self._close_socket()
-            raise NukeConnectionError(f"Communication error: {e}") from e
 
-        try:
-            return self._response_queue.get(timeout=timeout)
-        except queue.Empty:
-            raise NukeConnectionError(
-                f"Timeout waiting for response after {timeout}s"
-            ) from None
+        for attempt in range(2):
+            if self.sock is None:
+                self._reconnect()
+            try:
+                self.sock.sendall(msg.encode("utf-8"))
+            except OSError as e:
+                self._reset()
+                if attempt == 0:
+                    log.warning("Send failed (%s), reconnecting and retrying", e)
+                    continue
+                raise NukeConnectionError(f"Communication error: {e}") from e
+
+            try:
+                return self._response_queue.get(timeout=timeout)
+            except queue.Empty:
+                # The addon may still deliver this response later, which would
+                # then be handed back as the answer to the *next* command. Drop
+                # the connection so the following call starts from a clean state.
+                self._reset()
+                raise NukeConnectionError(
+                    f"Timeout waiting for response after {timeout}s"
+                ) from None
+
+        raise NukeConnectionError("Failed to send command to Nuke addon")
 
     def send_command(self, cmd_type: str, params: dict | None = None, timeout: float = 10.0) -> dict:
         """Send a command and return the result, raising on error."""
@@ -114,8 +130,7 @@ class NukeConnection:
 
     def disconnect(self):
         """Cleanly disconnect from the Nuke addon."""
-        self._stop_reader()
-        self._close_socket()
+        self._reset()
         self.handshake = None
         log.info("Disconnected from Nuke addon")
 
@@ -129,12 +144,28 @@ class NukeConnection:
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
 
-    def _stop_reader(self):
-        """Stop the reader thread."""
+    def _reset(self):
+        """Tear down the socket, reader thread, and any stale buffered state."""
         self._reader_running = False
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=2.0)
+        # Close first: this unblocks the reader thread's blocking recv().
+        self._close_socket()
+        thread = self._reader_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
         self._reader_thread = None
+        self._buffer = b""
+        # Discard late responses so they can't be returned to a later command.
+        while True:
+            try:
+                self._response_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _reconnect(self):
+        """Re-establish a dropped connection, keeping the same host and port."""
+        self._reset()
+        log.info("Reconnecting to Nuke addon at %s:%d", self.host, self.port)
+        self.connect(retries=2, base_delay=0.25)
 
     def _reader_loop(self):
         """Background loop: read messages and route events vs responses."""
