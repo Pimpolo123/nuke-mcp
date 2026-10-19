@@ -21,24 +21,27 @@ COMMANDS = {}
 META = {}
 
 
-def command(name, undo=False, journal=None, label=None, atomic=True):
+def command(name, undo=False, journal=None, label=None, atomic=True, always_rollback=False):
     """Register a handler.
 
     Handlers take a params dict and return a value (wrapped as the result) or a
     legacy {"status": ..., ...} envelope, and raise CommandError for user-facing
     failures.
 
-    undo:    run inside a labelled undo transaction (rolled back on failure).
-    journal: record the call in the session journal (defaults to ``undo``).
+    undo:            run inside a labelled undo transaction (rolled back on failure).
+    journal:         record the call in the session journal (defaults to ``undo``).
+    always_rollback: run in a transaction that is cancelled even on success, so
+                     the command can never leave a change in the script.
     """
 
     def decorator(fn):
         COMMANDS[name] = fn
         META[name] = {
-            "undo": undo,
+            "undo": undo or always_rollback,
             "journal": undo if journal is None else journal,
             "label": label or name,
-            "atomic": atomic,
+            "atomic": atomic or always_rollback,
+            "always_rollback": always_rollback,
         }
         return fn
 
@@ -49,6 +52,10 @@ class _ReturnedError(Exception):
     def __init__(self, response):
         super().__init__(response.get("error"))
         self.response = response
+
+
+class _ForcedRollback(_ReturnedError):
+    """Raised after a successful always_rollback command to cancel its transaction."""
 
 
 def _normalize(value):
@@ -80,6 +87,8 @@ def run_command(name, params=None):
             response = _normalize(handler(params))
             if response.get("status") == "error" and txn.enabled and atomic:
                 raise _ReturnedError(response)
+            if meta["always_rollback"]:
+                raise _ForcedRollback(response)
     except _ReturnedError as e:
         response = e.response
     except CommandError as e:

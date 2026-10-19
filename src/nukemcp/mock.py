@@ -8,6 +8,25 @@ import json
 import threading
 import socket
 
+# 1x1 transparent PNG, for commands that return images.
+_TINY_PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA"
+             "60e6kgAAAABJRU5ErkJggg==")
+IMAGE_COMMANDS = {"render_node_preview", "capture_screen"}
+ECHO_COMMANDS = {
+    "query_python", "get_node_graph", "scene_digest", "scene_delta", "get_selection",
+    "select_nodes", "get_node_metadata", "list_channels", "list_node_classes",
+    "node_classes_available", "get_node_default_knobs", "find_missing_frames", "glob_files",
+    "batch", "set_knob_expression", "set_knob_keyframes", "remove_knob_animation",
+    "disconnect_input", "duplicate_node", "merge_script", "replace_filepaths",
+    "get_viewer_info", "set_viewer_input", "set_current_frame", "zoom_to_node",
+    "viewer_playback", "undo_history", "undo_agent_session", "get_console_log",
+    "clear_console_log", "get_session_journal", "list_session_journals", "replay_journal",
+    "get_capabilities", "addon_reload", "render_start", "task_status", "task_cancel",
+    "list_tasks", "audit_color", "cameratracker_list_user_tracks",
+    "cameratracker_import_user_tracks", "cameratracker_user_tracks_to_axes",
+    "cameratracker_reprojection_qc",
+}
+
 
 class MockNukeState:
     """Minimal simulated Nuke scene state."""
@@ -40,6 +59,13 @@ class MockNukeState:
         params = command.get("params", {})
         handler = getattr(self, f"_cmd_{cmd_type}", None)
         if not handler:
+            if cmd_type in IMAGE_COMMANDS:
+                return {"status": "ok", "result": {"image_base64": _TINY_PNG, "format": "png",
+                                                   "width": 1, "height": 1, "echo": params}}
+            if cmd_type in ECHO_COMMANDS:
+                # Addon 0.2 commands: the real logic is tested against Nuke itself;
+                # the mock only proves the MCP layer forwards the right params.
+                return {"status": "ok", "result": {"echo": cmd_type, "params": params}}
             return {"status": "error", "error": f"Unknown command: {cmd_type}"}
         return handler(params)
 

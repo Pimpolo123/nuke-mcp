@@ -13,9 +13,47 @@ from fastmcp import FastMCP
 
 from nukemcp.connection import NukeConnection, NukeConnectionError, DEFAULT_HOST, DEFAULT_PORT
 from nukemcp.version import NukeVersion, parse_version
-from nukemcp.tools import graph, script, comp, render, templates, batch, tracking, threed, deep, ml, splats, annotations, instances
+from nukemcp.tools import (
+    annotations, batch, comp, deep, edit, graph, inspect, instances, ml, render, script,
+    session, splats, templates, threed, tracking, viewer,
+)
 
 log = logging.getLogger("nukemcp")
+
+INSTRUCTIONS = """
+Several Nuke sessions can be open at once. list_nuke_instances shows them and
+select_nuke_instance switches the target. Replies to changes include
+session.script: check it is the script the user means.
+
+Reading vs changing:
+- Read and compute with query_python: it needs no confirmation because every
+  change it makes is rolled back. Single expressions return their value.
+- Change the script with the dedicated tools or execute_python (show the code,
+  confirm=True). Each change is ONE undo step labelled "MCP: <tool>"; a failing
+  call is rolled back completely, so retrying never leaves half-built graphs.
+- batch runs several commands as one atomic undo step.
+- undo_agent_session takes back only your own steps (after undo_history).
+
+Seeing:
+- render_node_preview shows the pixels of any node at any frame through the
+  viewer's display transform (or raw, for data passes). Use it to check results.
+- capture_screen shows Nuke's UI (node graph, viewer, properties).
+
+Be economical: scene_digest + scene_delta instead of dumping every node;
+get_node_info(non_default_only=True) for one node.
+
+Long work: render_start + task_status (Nuke stays responsive).
+
+Nuke facts that bite:
+- Never assume sRGB/Rec.709: check get_script_info colour settings.
+  Data passes (depth, normals, position, motion, IDs) must be read raw in an
+  ACES/OCIO comp; audit_color finds the usual mistakes.
+- nuke.createNode(cls) takes no name argument; nuke.nodes.Cls(name=...) does.
+- CameraTracker: Solve cannot be triggered from Python (the user clicks it);
+  cameratracker_import_user_tracks / cameratracker_user_tracks_to_axes handle
+  user tracks safely. Table knobs need setAnimated() before setValueAt().
+- Nuke has a single project fps; a Read's frame rate is only metadata.
+"""
 
 
 class NukeMCPServer:
@@ -74,23 +112,12 @@ def build_server(
     version = NukeVersion(major=max(17, connected.major if connected else 0),
                           minor=0, patch="v0", variant="NukeX")
 
-    status = (
-        f"You are connected to {connected} (port {conn.port}). "
-        if connected else "No Nuke session was open when this server started. "
-    )
-    mcp = FastMCP(
-        "NukeMCP",
-        instructions=(
-            status
-            + "Several Nuke sessions can be open at once: use list_nuke_instances "
-            "to see them and select_nuke_instance to switch which one the tools act on. "
-            "Some tools need NukeX or Nuke 17 and fail on other sessions. "
-            "Use the available tools to inspect and modify the Nuke script. "
-            "Always check the current state with get_script_info or get_node_info "
-            "before making changes. Never delete nodes or execute code without "
-            "user confirmation (set confirm=True only after the user agrees)."
-        ),
-    )
+    if connected:
+        script_name = (conn.handshake or {}).get("script") or "an unsaved script"
+        status = f"You are connected to {connected} on port {conn.port}, editing {script_name}. "
+    else:
+        status = "No Nuke session was open when this server started; tools connect on first use. "
+    mcp = FastMCP("NukeMCP", instructions=status + INSTRUCTIONS)
 
     server = NukeMCPServer(mcp, conn, version, mock_server=mock_server)
 
@@ -108,6 +135,10 @@ def build_server(
     splats.register(server)
     annotations.register(server)
     instances.register(server)
+    inspect.register(server)
+    edit.register(server)
+    viewer.register(server)
+    session.register(server)
 
     # Register non-tool modules (memory, rag, events, resources, prompts)
     from nukemcp import memory, rag, events, resources, prompts
@@ -149,7 +180,8 @@ def build_server(
 def main():
     parser = argparse.ArgumentParser(description="NukeMCP — MCP server for Foundry Nuke")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Nuke addon host (default: localhost)")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Nuke addon port (default: 54321)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help="Nuke addon port (default: $NUKE_MCP_PORT or 54321)")
     parser.add_argument("--mock", action="store_true", help="Use mock Nuke socket for offline development")
     parser.add_argument("--mock-version", default="17.0v1", help="Mock Nuke version (default: 17.0v1)")
     parser.add_argument("--mock-variant", default="NukeX", help="Mock Nuke variant (default: NukeX)")

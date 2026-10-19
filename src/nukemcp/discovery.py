@@ -343,12 +343,11 @@ def detect_license() -> LicenseInfo:
                 return LicenseInfo(True, "license_file", f"{var}={val}")
             return LicenseInfo(False, "env_var_invalid", f"{var}='{val}' but target not found")
 
-    for lp in [
-        Path.home() / ".foundry" / "foundry.lic",
-        Path("/usr/local/foundry/RLM/foundry.lic"),
-        Path("/opt/foundry/RLM/foundry.lic"),
-        Path.home() / ".nuke" / "foundry.lic",
-    ]:
+    home = _home()
+    candidates = [Path("/usr/local/foundry/RLM/foundry.lic"), Path("/opt/foundry/RLM/foundry.lic")]
+    if home:
+        candidates += [home / ".foundry" / "foundry.lic", home / ".nuke" / "foundry.lic"]
+    for lp in candidates:
         if lp.is_file():
             return LicenseInfo(True, "license_file", str(lp))
 
@@ -415,7 +414,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname({addon_path!r}))
 import nuke_mcp_addon
 server = nuke_mcp_addon.NukeMCPServer(port={port})
-print("NukeMCP addon listening on port {port}", file=sys.stderr)
+print("NukeMCP addon starting on port {port} (or the next free one)", file=sys.stderr)
 server.serve_forever()
 """
 
@@ -432,10 +431,10 @@ def launch_headless(
 
     if addon_path is None:
         addon_path = _find_addon()
-    if not addon_path or not Path(addon_path).is_file():
+    if not addon_path or not Path(addon_path).exists():
         raise FileNotFoundError(
-            "nuke_mcp_addon.py not found. "
-            "Copy nuke_addon/nuke_mcp_addon.py to ~/.nuke/ or pass addon_path."
+            "NukeMCP addon not found. "
+            "Copy the nuke_addon/nuke_mcp_addon folder to ~/.nuke/ or pass addon_path."
         )
 
     bootstrap = tempfile.NamedTemporaryFile(
@@ -486,13 +485,23 @@ def stop_headless(proc: subprocess.Popen, timeout: float = 10.0) -> None:
 
 
 def _find_addon() -> str | None:
-    for c in [
-        Path.home() / ".nuke" / "nuke_mcp_addon.py",
-        Path(__file__).parent.parent.parent / "nuke_addon" / "nuke_mcp_addon.py",
-    ]:
-        if c.is_file():
+    """The addon package directory (0.2+) or the legacy single-file addon."""
+    candidates = [Path(__file__).parent.parent.parent / "nuke_addon" / "nuke_mcp_addon"]
+    home = _home()
+    if home:
+        candidates += [home / ".nuke" / "nuke_mcp_addon", home / ".nuke" / "nuke_mcp_addon.py"]
+    for c in candidates:
+        if (c / "__init__.py").is_file() or (c.suffix == ".py" and c.is_file()):
             return str(c.resolve())
     return None
+
+
+def _home() -> Path | None:
+    """Path.home() raises when HOME/USERPROFILE are unset (services, CI)."""
+    try:
+        return Path.home()
+    except RuntimeError:
+        return None
 
 
 def _cleanup(path: str) -> None:

@@ -2,37 +2,80 @@
 
 import json
 import logging
+import os
 import queue
 import socket
+import tempfile
 import threading
 import time
 
 log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 54321
 PORT_RANGE = 10  # the addon takes the first free port in 54321-54330
+# A Nuke session exports the port its addon bound as NUKE_MCP_PORT, so an MCP
+# server launched from inside that Nuke (e.g. by an in-Nuke assistant panel)
+# talks to that same session by default.
+DEFAULT_PORT = int(os.environ.get("NUKE_MCP_PORT", "54321"))
+BASE_PORT = 54321
 RECV_BUFFER = 1024 * 1024  # 1MB
+REGISTRY_STALE_SECONDS = 35  # the addon heartbeats every 10 s
 
 
 class NukeConnectionError(Exception):
     """Failed to connect or communicate with the Nuke addon."""
 
 
+def registry_instances() -> dict[int, dict]:
+    """Sessions announced in %TEMP%/nuke_mcp/instances by addon >= 0.2.
+
+    Readable without a socket, so a session busy rendering is still listed.
+    Entries whose heartbeat is older than REGISTRY_STALE_SECONDS are ignored.
+    """
+    folder = os.path.join(tempfile.gettempdir(), "nuke_mcp", "instances")
+    found: dict[int, dict] = {}
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return found
+    now = time.time()
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as fh:
+                info = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if now - float(info.get("heartbeat", 0)) > REGISTRY_STALE_SECONDS:
+            continue
+        if isinstance(info.get("port"), int):
+            found[info["port"]] = info
+    return found
+
+
 def scan_instances(
     host: str = DEFAULT_HOST,
-    start_port: int = DEFAULT_PORT,
+    start_port: int = BASE_PORT,
     count: int = PORT_RANGE,
     timeout: float = 2.0,
 ) -> list[dict]:
-    """Find running Nuke addons by probing the port range.
+    """Find running Nuke addons on the port range.
 
-    Returns one dict per responding port with the handshake fields
-    (nuke_version, variant, pid, script) plus "port". A Nuke that accepts the
-    connection but is too busy to answer is reported with "busy": True.
+    Sessions with a fresh registry entry are listed from it (no socket needed).
+    Other ports are probed for a handshake. A port that accepts but does not
+    send a NukeMCP handshake is reported with "busy": True (an old addon
+    blocked by a render, or another tool using that port).
     """
+    registry = registry_instances()
     found = []
     for port in range(start_port, start_port + count):
+        if port in registry:
+            info = dict(registry[port])
+            info.pop("heartbeat", None)
+            info["source"] = "registry"
+            found.append({"port": port, **info})
+            continue
         try:
             sock = socket.create_connection((host, port), timeout=0.3)
         except OSError:
@@ -47,9 +90,12 @@ def scan_instances(
                 buf += chunk
             if b"\n" in buf:
                 info = json.loads(buf.split(b"\n", 1)[0].decode("utf-8"))
+                if not isinstance(info, dict) or "nuke_version" not in info:
+                    raise ValueError("not a NukeMCP handshake")
                 info.pop("type", None)
+                info.pop("commands", None)
                 found.append({"port": port, **info})
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             found.append({"port": port, "busy": True})
         finally:
             try:
@@ -149,7 +195,7 @@ class NukeConnection:
             except NukeConnectionError:
                 continue
         raise NukeConnectionError(
-            f"No Nuke addon found on ports {DEFAULT_PORT}-{DEFAULT_PORT + PORT_RANGE - 1}. "
+            f"No Nuke addon found on ports {BASE_PORT}-{BASE_PORT + PORT_RANGE - 1}. "
             "Open Nuke and start NukeMCP (Nodes > NukeMCP > Start Server)."
         )
 

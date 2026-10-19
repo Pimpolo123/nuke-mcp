@@ -47,6 +47,18 @@ def _snippet_traceback(exc_type, exc, tb, code):
     return report
 
 
+@command("query_python", always_rollback=True, label="query_python")
+def query_python(params):
+    """Like execute_python, but every change to the script is rolled back.
+
+    For inspection: the snippet can create helper nodes, change knobs to probe
+    values, etc.; the graph is restored before the reply. Filesystem and
+    process side effects are not covered by undo and are refused by the MCP
+    server's safety scan.
+    """
+    return execute_python(params)
+
+
 @command("execute_python", undo=True, label="execute_python")
 def execute_python(params):
     code = params["code"]

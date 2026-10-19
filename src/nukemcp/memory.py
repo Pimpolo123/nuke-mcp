@@ -52,7 +52,7 @@ def list_files() -> list[str]:
     for root, _dirs, files in os.walk(MEMORY_DIR):
         for fname in files:
             full = Path(root) / fname
-            result.append(str(full.relative_to(MEMORY_DIR)))
+            result.append(full.relative_to(MEMORY_DIR).as_posix())
     return sorted(result)
 
 

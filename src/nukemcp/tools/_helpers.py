@@ -26,3 +26,16 @@ def connect_nodes(conn: NukeConnection, output: str, inp: str, index: int = 0) -
     conn.send_command("connect_nodes", {
         "output_node": output, "input_node": inp, "input_index": index,
     })
+
+
+def image_content(response: dict) -> list:
+    """Turn an addon reply carrying ``image_base64`` into MCP content:
+    an Image the model can look at, plus the remaining fields as JSON text."""
+    import base64
+
+    from fastmcp.utilities.types import Image
+
+    info = dict(response)
+    data = base64.b64decode(info.pop("image_base64"))
+    fmt = info.get("format", "png")
+    return [Image(data=data, format="jpeg" if fmt in ("jpg", "jpeg") else fmt), info]
