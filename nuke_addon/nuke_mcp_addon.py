@@ -90,7 +90,13 @@ def _handle_get_script_info(params: dict) -> dict:
             "name": root.name(),
             "frame_range": [root["first_frame"].value(), root["last_frame"].value()],
             "fps": root["fps"].value(),
-            "format": str(root.format()),
+            # str() on a Format yields a useless repr; expose the real numbers.
+            "format": {
+                "name": root.format().name() or "",
+                "width": root.format().width(),
+                "height": root.format().height(),
+                "pixel_aspect": root.format().pixelAspect(),
+            },
             "colorspace": root["colorManagement"].value(),
             "node_count": len(nuke.allNodes()),
         },
@@ -545,22 +551,25 @@ def _handle_list_annotations(params: dict) -> dict:
 
 
 
-_event_client_socket = None
+_event_client_sockets = set()
 _event_socket_lock = threading.Lock()
 _registered_callbacks = set()
 
 
 def _push_event(event_type: str, data: dict):
-    """Push an event to the connected MCP client."""
-    if _event_client_socket is None:
+    """Push an event to every connected MCP client."""
+    with _event_socket_lock:
+        clients = list(_event_client_sockets)
+    if not clients:
         return
     event = {"type": "event", "event_type": event_type, "data": data}
-    msg = json.dumps(event) + "\n"
-    with _event_socket_lock:
+    msg = (json.dumps(event) + "\n").encode("utf-8")
+    for client in clients:
         try:
-            _event_client_socket.sendall(msg.encode("utf-8"))
+            client.sendall(msg)
         except OSError:
-            pass
+            with _event_socket_lock:
+                _event_client_sockets.discard(client)
 
 
 def _on_node_created():
@@ -739,7 +748,7 @@ class NukeMCPServer:
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_sock.settimeout(1.0)
         self._server_sock.bind(("127.0.0.1", self.port))
-        self._server_sock.listen(1)
+        self._server_sock.listen(8)
         self._emit_log(f"Listening on port {self.port}")
 
         while self._running:
@@ -751,14 +760,19 @@ class NukeMCPServer:
                 break
 
             self._emit_log(f"Client connected from {addr[0]}:{addr[1]}")
-            self._handle_client(client)
-            self._emit_log("Client disconnected")
+            # One thread per client: the panel's own claude session and a
+            # terminal session must be able to attach at the same time.
+            threading.Thread(
+                target=self._handle_client, args=(client,), daemon=True
+            ).start()
 
     def _run_in_nuke(self, func, *args):
         """Call func in Nuke's main thread (GUI) or via queue (headless)."""
         nuke = _get_nuke()
         if nuke.GUI:
-            return nuke.executeInMainThread(func, args=args)
+            # executeInMainThread is fire-and-forget and always returns None;
+            # the WithResult variant blocks and hands back the return value.
+            return nuke.executeInMainThreadWithResult(func, args=args)
         if self._main_queue is not None:
             result_q = queue.Queue()
             self._main_queue.put((func, args, result_q))
@@ -769,17 +783,24 @@ class NukeMCPServer:
         return func(*args)
 
     def _handle_client(self, client: socket.socket):
-        global _event_client_socket
         client.settimeout(None)
-        _event_client_socket = client
-
-        # Send handshake
-        handshake = self._run_in_nuke(_handshake_data)
-        if not isinstance(handshake, dict):
+        with _event_socket_lock:
+            _event_client_sockets.add(client)
+        try:
+            self._client_loop(client)
+        finally:
+            with _event_socket_lock:
+                _event_client_sockets.discard(client)
             try:
                 client.close()
             except OSError:
                 pass
+            self._emit_log("Client disconnected")
+
+    def _client_loop(self, client: socket.socket):
+        # Send handshake
+        handshake = self._run_in_nuke(_handshake_data)
+        if not isinstance(handshake, dict):
             return
         self._send(client, handshake)
 
@@ -816,12 +837,6 @@ class NukeMCPServer:
 
                 self._send(client, response)
                 self._emit_log(f"-> {response.get('status', '?')}")
-
-        _event_client_socket = None
-        try:
-            client.close()
-        except OSError:
-            pass
 
     def _send(self, client: socket.socket, data: dict):
         msg = json.dumps(data) + "\n"
