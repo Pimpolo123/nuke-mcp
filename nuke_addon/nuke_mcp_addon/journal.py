@@ -13,8 +13,9 @@ import time
 from .constants import JOURNAL_KEEP_FILES
 from .util import temp_dir
 
-_lock = threading.Lock()
-_path = None
+# Keep writing to the same file across addon hot reloads.
+_lock = globals().get("_lock") or threading.Lock()
+_path = globals().get("_path")
 
 
 def path():

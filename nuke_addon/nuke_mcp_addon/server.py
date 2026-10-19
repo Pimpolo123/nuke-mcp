@@ -52,6 +52,8 @@ def handshake_data(port):
         script = nuke.root().name()
     except Exception:
         script = ""
+    if script == "Root":  # unsaved script
+        script = ""
     return {
         "type": "handshake",
         "nuke_version": nuke.NUKE_VERSION_STRING,

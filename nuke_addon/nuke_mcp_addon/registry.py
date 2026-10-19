@@ -17,10 +17,11 @@ import time
 from .constants import ADDON_VERSION, HEARTBEAT_SECONDS
 from .util import temp_dir
 
-_state = {}
-_lock = threading.Lock()
-_stop = threading.Event()
-_thread = None
+# Survive addon hot reloads: one heartbeat thread, one state.
+_state = globals().get("_state") or {}
+_lock = globals().get("_lock") or threading.Lock()
+_stop = globals().get("_stop") or threading.Event()
+_thread = globals().get("_thread")
 
 
 def _file():

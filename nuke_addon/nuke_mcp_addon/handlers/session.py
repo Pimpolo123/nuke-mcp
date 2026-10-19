@@ -108,18 +108,44 @@ def get_capabilities(params):
         if key in root.knobs():
             caps[key] = root[key].value()
     caps["ocio_env"] = os.environ.get("OCIO")
-    from .inspect import _walk_menu
-    found = []
-    try:
-        _walk_menu(nuke.menu("Nodes"), [], found)
-    except Exception:
-        pass
-    classes = {f["class"] for f in found}
-    caps["ml"] = {c: c in classes for c in ("CopyCat", "BigCat", "Inference")}
-    caps["notable_nodes"] = {c: c in classes for c in
-                             ("CameraTracker", "OCIODisplay", "Polychase", "GaussianSplat",
-                              "ScanlineRender2", "DeepRead", "SmartVector")}
+    caps["ml"] = probe_classes(("CopyCat", "BigCat", "Inference"))
+    caps["notable_nodes"] = probe_classes(("CameraTracker", "OCIODisplay", "Polychase",
+                                           "ScanlineRender2", "DeepRead", "SmartVector"))
     return caps
+
+
+_class_cache = globals().get("_class_cache") or {}
+
+
+def probe_classes(classes):
+    """Which node classes exist in this session.
+
+    The Nodes menu does not list everything (ML and NukeX nodes are registered
+    differently), so each class is created and deleted once, with undo disabled
+    and callbacks suspended. ~0.25 s for CopyCat, cached afterwards.
+    """
+    from .. import hooks
+    from ..undo import undo_disabled
+
+    nuke = get_nuke()
+    missing = [c for c in classes if c not in _class_cache]
+    if missing:
+        with hooks.suspended(), undo_disabled():
+            for cls in missing:
+                factory = getattr(nuke.nodes, cls, None)
+                try:
+                    node = factory() if factory else None
+                except Exception:
+                    node = None
+                _class_cache[cls] = node is not None
+                if node is not None:
+                    nuke.delete(node)
+    return {c: _class_cache[c] for c in classes}
+
+
+@command("node_classes_available")
+def node_classes_available(params):
+    return probe_classes(tuple(params["classes"]))
 
 
 @command("addon_reload")

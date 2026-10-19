@@ -17,6 +17,7 @@ Foundry's own importTracker does, instead of hard-coding the stride.
 """
 
 import math
+import re
 import statistics
 
 from ..dispatch import command
@@ -119,12 +120,14 @@ def cameratracker_import_user_tracks(params):
             "next_step": "Press Solve in the CameraTracker panel (no Python entry point)."}
 
 
+_CAMERA_CLASS = re.compile(r"^Camera\d*$")  # not CameraTracker / CameraTrackerPointCloud
+
+
 def _find_camera(ct, wanted):
     nuke = get_nuke()
     if wanted:
         return require_node(wanted)
-    cams = [n for n in nuke.allNodes(recurseGroups=True)
-            if n.Class().startswith("Camera") and n.Class() != "CameraTracker"]
+    cams = [n for n in nuke.allNodes(recurseGroups=True) if _CAMERA_CLASS.match(n.Class())]
     linked = []
     for cam in cams:
         for knob_name in ("translate", "rotate", "focal"):
@@ -195,6 +198,8 @@ def cameratracker_user_tracks_to_axes(params):
     if not tracks:
         raise CommandError("No user tracks with a 3D position on %s" % ct.fullName())
 
+    # Resolve the camera before creating anything, so a missing camera fails fast.
+    camera = _find_camera(ct, params.get("camera_node")) if params.get("verify", True) else None
     existing = [n for n in nuke.allNodes(recurseGroups=False)
                 if n.Class() in ("Axis", "Axis2", "Axis3", "Axis4")]
     axis_class = params.get("axis_class") or (existing[0].Class() if existing else "Axis")
@@ -236,8 +241,7 @@ def cameratracker_user_tracks_to_axes(params):
 
     result = {"node": ct.fullName(), "axis_class": axis_class, "created": created,
               "skipped": skipped}
-    if params.get("verify", True) and pairs:
-        camera = _find_camera(ct, params.get("camera_node"))
+    if camera is not None and pairs:
         frames, errors, summary = _qc(ct, camera, pairs, int(params.get("qc_frames", 5)))
         result["qc"] = {"camera": camera.fullName(), "frames": frames,
                         "summary": summary, "errors_px": errors,

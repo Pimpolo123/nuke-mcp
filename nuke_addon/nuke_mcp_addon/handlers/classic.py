@@ -318,7 +318,7 @@ def list_annotations(params):
 
 # -- events -----------------------------------------------------------------------
 
-_registered = set()
+_registered = globals().get("_registered") or set()
 
 
 def _on_node_created():

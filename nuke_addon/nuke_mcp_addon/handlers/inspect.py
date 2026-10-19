@@ -96,7 +96,10 @@ def _walk_menu(menu, path, out):
         if hasattr(item, "items"):
             _walk_menu(item, path + [name], out)
             continue
-        script = item.script() if hasattr(item, "script") else ""
+        try:
+            script = item.script() if hasattr(item, "script") else ""
+        except RuntimeError:  # "item is not a script command" (Python callables)
+            continue
         match = re.search(r"""create(?:Node|NodeLocal)\(\s*['"]([A-Za-z0-9_]+)['"]""", script or "")
         if match:
             out.append({"class": match.group(1), "label": name, "menu": "/".join(path)})
@@ -144,7 +147,7 @@ def get_node_default_knobs(params):
 
 # -- digest / delta ------------------------------------------------------------
 
-_snapshots = {}
+_snapshots = globals().get("_snapshots") or {}
 
 
 def _node_signature(node):

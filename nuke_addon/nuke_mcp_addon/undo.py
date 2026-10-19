@@ -15,11 +15,20 @@ Nuke facts this relies on (checked on 15.1 and 17.x):
 """
 
 import contextlib
+import re
 
 from .constants import UNDO_PREFIX
 from .util import get_nuke
 
 _depth = 0  # only the outermost transaction opens/closes a Nuke undo group
+
+# Nodes the agent created this session. Nuke 17 re-applies some knobs of new
+# nodes a moment later, outside any undo group (a fresh Write gets a separate
+# "change <Write>.out_colorspace" step). Those steps are side effects of the
+# agent's own work, so undo_agent_session may take them back too.
+AGENT_NODES = globals().get("AGENT_NODES") or set()
+AUTO_KNOBS = ("out_colorspace",)
+_AUTO_STEP = re.compile(r"^change (?P<node>\S+)\.(?P<knob>\S+)$")
 
 
 def _undo_api():
@@ -55,8 +64,11 @@ class Transaction:
                 self._owner = True
             except Exception:
                 self._owner = False
-            if self._owner and self.atomic and not _gui():
-                self._nodes_before = _node_ids()
+            if self._owner:
+                try:
+                    self._nodes_before = _node_ids()
+                except Exception:
+                    self._nodes_before = None
         _depth += 1
         return self
 
@@ -69,11 +81,12 @@ class Transaction:
             return False
         api = _undo_api()
         if exc_type is not None and self.atomic:
-            if self._nodes_before is not None:
+            if not _gui() and self._nodes_before is not None:
+                # Terminal sessions keep no undo stack: remove what was created.
                 self.rolled_back = _delete_new_nodes(self._nodes_before)
             try:
                 api.cancel()
-                if self._nodes_before is None:
+                if _gui():
                     self.rolled_back = True
                 return False
             except Exception:
@@ -82,6 +95,11 @@ class Transaction:
             api.end()
         except Exception:
             pass
+        if exc_type is None and self._nodes_before is not None:
+            try:
+                AGENT_NODES.update(_node_ids() - self._nodes_before)
+            except Exception:
+                pass
         return False
 
 
@@ -112,6 +130,16 @@ def in_transaction():
     return _depth > 0
 
 
+def is_agent_side_effect(label):
+    """A step Nuke recorded on its own for a node the agent created (see AUTO_KNOBS).
+
+    Deliberately narrow: a user edit of any other knob on an agent node is the
+    user's work and is never treated as the agent's."""
+    match = _AUTO_STEP.match(label or "")
+    return bool(match and match.group("knob") in AUTO_KNOBS
+                and match.group("node") in AGENT_NODES)
+
+
 def describe(index=0):
     """Label of the undo step ``index`` places back from the top ('' if none)."""
     api = _undo_api()
@@ -136,7 +164,8 @@ def history(limit=20):
         label = describe(i)
         if not label:
             break
-        steps.append({"index": i, "label": label, "agent": label.startswith(UNDO_PREFIX)})
+        agent = label.startswith(UNDO_PREFIX) or is_agent_side_effect(label)
+        steps.append({"index": i, "label": label, "agent": agent})
     return steps
 
 
@@ -156,7 +185,7 @@ def undo_agent_steps(max_steps=200):
         label = describe(0)
         if not label:
             break
-        if not label.startswith(UNDO_PREFIX):
+        if not label.startswith(UNDO_PREFIX) and not is_agent_side_effect(label):
             stopped_at = label
             break
         if hasattr(api, "undo"):

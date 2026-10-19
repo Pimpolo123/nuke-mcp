@@ -24,7 +24,7 @@ from ..dispatch import command
 from ..util import get_nuke, get_nukescripts, jsonable
 
 FILENAME = "<nuke-mcp>"
-_session_ns = {}
+_session_ns = globals().get("_session_ns") or {}
 
 
 def _fresh_namespace():
@@ -85,7 +85,8 @@ def execute_python(params):
         }
     console.record("stdout", out.getvalue(), source="execute_python")
     console.record("stderr", err.getvalue(), source="execute_python")
-    response = {"status": "ok", "result": jsonable(value), "mode": mode}
+    response = {"status": "ok", "result": jsonable(value, max_items=200000, max_str=1 << 28),
+                "mode": mode}
     if out.getvalue():
         response["stdout"] = out.getvalue()[-20000:]
     if err.getvalue():

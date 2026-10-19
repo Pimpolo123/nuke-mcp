@@ -12,8 +12,8 @@ import uuid
 from ..dispatch import command
 from ..util import CommandError, get_nuke, require_node
 
-_tasks = {}
-_lock = threading.Lock()
+_tasks = globals().get("_tasks") or {}  # running renders survive a hot reload
+_lock = globals().get("_lock") or threading.Lock()
 
 
 def _public(task):

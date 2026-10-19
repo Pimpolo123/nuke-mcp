@@ -3,8 +3,8 @@
 import json
 import threading
 
-_clients = set()
-_lock = threading.Lock()
+_clients = globals().get("_clients") or set()
+_lock = globals().get("_lock") or threading.Lock()
 
 
 def add_client(sock):

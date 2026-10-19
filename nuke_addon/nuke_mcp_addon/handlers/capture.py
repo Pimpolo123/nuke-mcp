@@ -1,8 +1,9 @@
-"""Let the agent see: physical screen captures and rendered node previews."""
+"""Let the agent see: window/panel captures and rendered node previews."""
 
 import base64
 import os
 import re
+import sys
 import time
 
 from .. import hooks
@@ -22,11 +23,105 @@ def _qt():
 
 
 def _main_window(QtWidgets):
-    """nuke.mainWindow does not exist (17.1): use the biggest visible top-level."""
+    """nuke.mainWindow does not exist (17.1). Floating panels (a torn-off Viewer)
+    are QMainWindows too, so prefer Nuke's own object name, then the biggest."""
     tops = [w for w in QtWidgets.QApplication.topLevelWidgets() if w.isVisible()]
     if not tops:
         raise CommandError("No visible Nuke window (terminal mode cannot capture the screen)")
-    return max(tops, key=lambda w: w.width() * w.height())
+    for w in tops:
+        if w.objectName() == "NukeMainWindow":
+            return w
+    mains = [w for w in tops if isinstance(w, QtWidgets.QMainWindow)] or tops
+    return max(mains, key=lambda w: w.width() * w.height())
+
+
+def _print_window(QtGui, hwnd):
+    """Windows only: ask the OS to render a window into a bitmap.
+
+    PW_RENDERFULLCONTENT includes OpenGL/DirectX content (the Viewer image and
+    the Node Graph are GL) and works while the window is covered by other
+    applications, which a screen grab would capture instead.
+    Returns (QImage, window_top_left, client_origin) or None.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+    user32.GetDC.restype = wintypes.HDC
+    user32.GetDC.argtypes = [wintypes.HWND]
+    user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    gdi32.CreateCompatibleDC.restype = wintypes.HDC
+    gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+    gdi32.CreateCompatibleBitmap.restype = wintypes.HBITMAP
+    gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+    gdi32.SelectObject.restype = wintypes.HGDIOBJ
+    gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+    gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    gdi32.DeleteDC.argtypes = [wintypes.HDC]
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG),
+                    ("biHeight", wintypes.LONG), ("biPlanes", wintypes.WORD),
+                    ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                    ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD)]
+
+    gdi32.GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+                                ctypes.c_void_p, ctypes.POINTER(BITMAPINFOHEADER), wintypes.UINT]
+    hwnd = wintypes.HWND(hwnd)
+    if user32.IsIconic(hwnd):
+        raise CommandError("The Nuke window is minimized")
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    width, height = rect.right - rect.left, rect.bottom - rect.top
+    if width <= 0 or height <= 0:
+        return None
+    origin = wintypes.POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(origin))
+    screen_dc = user32.GetDC(None)
+    mem_dc = gdi32.CreateCompatibleDC(screen_dc)
+    bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+    previous = gdi32.SelectObject(mem_dc, bitmap)
+    try:
+        if not user32.PrintWindow(hwnd, mem_dc, 2):  # 2 = PW_RENDERFULLCONTENT
+            return None
+        header = BITMAPINFOHEADER(40, width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+        pixels = ctypes.create_string_buffer(width * height * 4)
+        gdi32.GetDIBits(mem_dc, bitmap, 0, height, pixels, ctypes.byref(header), 0)
+    finally:
+        gdi32.SelectObject(mem_dc, previous)
+        gdi32.DeleteObject(bitmap)
+        gdi32.DeleteDC(mem_dc)
+        user32.ReleaseDC(None, screen_dc)
+    image = QtGui.QImage(pixels.raw, width, height, width * 4, QtGui.QImage.Format_RGB32).copy()
+    return image, (rect.left, rect.top), (origin.x, origin.y)
+
+
+def _capture_widget(QtCore, QtGui, QtWidgets, widget):
+    """Pixels of one widget, never including other applications (on Windows)."""
+    top = widget.window()
+    if sys.platform == "win32":
+        grabbed = _print_window(QtGui, int(top.winId()))
+        if grabbed is not None:
+            image, win_pos, client = grabbed
+            dpr = widget.devicePixelRatioF()
+            offset = QtCore.QPoint(0, 0) if widget is top else widget.mapTo(top, QtCore.QPoint(0, 0))
+            x = (client[0] - win_pos[0]) + int(round(offset.x() * dpr))
+            y = (client[1] - win_pos[1]) + int(round(offset.y() * dpr))
+            w, h = int(round(widget.width() * dpr)), int(round(widget.height() * dpr))
+            return QtGui.QPixmap.fromImage(image.copy(x, y, w, h)), "printwindow"
+    # Other platforms: physical screen grab (windows on top of Nuke will show).
+    app = QtWidgets.QApplication.instance()
+    rect = QtCore.QRect(widget.mapToGlobal(QtCore.QPoint(0, 0)), widget.size())
+    screen = app.screenAt(rect.center()) or app.primaryScreen()
+    sg = screen.geometry()
+    pixmap = screen.grabWindow(0, rect.x() - sg.x(), rect.y() - sg.y(), rect.width(), rect.height())
+    return pixmap, "screen_grab"
 
 
 _PANELS = {"dag": ("DAG", "Node Graph"), "viewer": ("Viewer",), "properties": ("Properties",),
@@ -63,9 +158,13 @@ def _encode(QtCore, pixmap, max_size, fmt):
 
 @command("capture_screen")
 def capture_screen(params):
-    """mode: window (Nuke's main window), screen (whole monitor), or a panel name:
-    dag, viewer, properties, script_editor, curve_editor, dope_sheet, or any
-    text matched against widget names/titles."""
+    """mode: window (Nuke's main window), a panel name (dag, viewer, properties,
+    script_editor, curve_editor, dope_sheet, or any text matched against widget
+    names/titles), or screen (the whole monitor, other applications included).
+
+    On Windows, windows and panels are captured with PrintWindow: the result
+    contains only Nuke (GL viewer and node graph included) even when other
+    applications cover it."""
     QtCore, QtGui, QtWidgets = _qt()
     app = QtWidgets.QApplication.instance()
     if app is None:
@@ -73,22 +172,17 @@ def capture_screen(params):
     mode = (params.get("mode") or "window").lower()
     win = _main_window(QtWidgets)
     if mode == "screen":
+        # Whole monitor exactly as displayed, other applications included.
         screen = win.screen() if hasattr(win, "screen") else app.primaryScreen()
-        pixmap = screen.grabWindow(0)
-        target = "screen"
+        pixmap, method, target = screen.grabWindow(0), "screen_grab", "screen"
     else:
         widget = win if mode == "window" else _find_panel(QtWidgets, mode)
-        top_left = widget.mapToGlobal(QtCore.QPoint(0, 0))
-        rect = QtCore.QRect(top_left, widget.size())
-        screen = app.screenAt(rect.center()) or app.primaryScreen()
-        sg = screen.geometry()
-        pixmap = screen.grabWindow(0, rect.x() - sg.x(), rect.y() - sg.y(), rect.width(),
-                                   rect.height())
+        pixmap, method = _capture_widget(QtCore, QtGui, QtWidgets, widget)
         target = widget.objectName() or widget.windowTitle() or mode
     fmt = params.get("format", "png")
     data, w, h = _encode(QtCore, pixmap, int(params.get("max_size", 1600)), fmt)
     return {"image_base64": base64.b64encode(data).decode("ascii"), "format": fmt,
-            "width": w, "height": h, "target": target}
+            "width": w, "height": h, "target": target, "method": method}
 
 
 # -- node preview -------------------------------------------------------------

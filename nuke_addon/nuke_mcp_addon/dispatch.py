@@ -59,9 +59,10 @@ def _normalize(value):
 
 def _current_script():
     try:
-        return get_nuke().root().name()
+        name = get_nuke().root().name()
     except Exception:
         return registry.script_name()
+    return "" if name == "Root" else name  # unsaved script
 
 
 def run_command(name, params=None):
@@ -92,7 +93,9 @@ def run_command(name, params=None):
     if txn.rolled_back:
         response["rolled_back"] = True
 
-    response = jsonable(response)
+    # Only guarantee serializability here; size limits are each handler's call
+    # (images travel as large base64 strings).
+    response = jsonable(response, max_items=1000000, max_str=1 << 30)
     elapsed = int((time.perf_counter() - started) * 1000)
     response["elapsed_ms"] = elapsed
 

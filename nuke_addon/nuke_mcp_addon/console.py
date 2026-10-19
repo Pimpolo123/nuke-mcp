@@ -12,10 +12,11 @@ import time
 
 from .constants import CONSOLE_MAX_LINES
 
-_lines = collections.deque(maxlen=CONSOLE_MAX_LINES)
-_lock = threading.Lock()
-_partial = {"stdout": "", "stderr": ""}
-_seq = 0
+# globals().get(...) keeps the buffer across addon hot reloads.
+_lines = globals().get("_lines") or collections.deque(maxlen=CONSOLE_MAX_LINES)
+_lock = globals().get("_lock") or threading.Lock()
+_partial = globals().get("_partial") or {"stdout": "", "stderr": ""}
+_seq = globals().get("_seq", 0)
 
 
 def record(stream, text, source="nuke"):
