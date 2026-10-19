@@ -9,6 +9,7 @@ The heartbeat thread never touches the Nuke API (that is only safe on the main
 thread); the script name is refreshed from Nuke callbacks and from commands.
 """
 
+import atexit
 import json
 import os
 import threading
@@ -22,6 +23,7 @@ _state = globals().get("_state") or {}
 _lock = globals().get("_lock") or threading.Lock()
 _stop = globals().get("_stop") or threading.Event()
 _thread = globals().get("_thread")
+_atexit_registered = globals().get("_atexit_registered", False)
 
 
 def _file():
@@ -75,8 +77,12 @@ def _beat():
 
 
 def start(port, nuke_version, variant, script):
-    global _thread
+    global _thread, _atexit_registered
     _prune_dead()
+    if not _atexit_registered:
+        # Closing Nuke never calls stop(): remove our entry when Python shuts down.
+        atexit.register(stop)
+        _atexit_registered = True
     update(pid=os.getpid(), port=port, nuke_version=nuke_version, variant=variant,
            script=script, addon_version=ADDON_VERSION, started=time.time())
     _stop.clear()
