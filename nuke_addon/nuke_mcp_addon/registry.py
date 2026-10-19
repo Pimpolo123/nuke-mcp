@@ -31,7 +31,29 @@ def _file():
 def update(**fields):
     with _lock:
         _state.update(fields)
-    _write()
+        started = "port" in _state
+    if started:  # commands also run without a server (tests, nuke -t scripts)
+        _write()
+
+
+def _prune_dead(max_age=120):
+    """Drop entries of sessions that stopped heartbeating (crashed or killed Nukes)."""
+    folder = temp_dir("instances")
+    now = time.time()
+    for name in os.listdir(folder):
+        path = os.path.join(folder, name)
+        if not name.endswith(".json") or name == "%d.json" % os.getpid():
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                beat = float(json.load(fh).get("heartbeat", 0))
+        except (OSError, ValueError):
+            beat = 0
+        if now - beat > max_age:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 def _write():
@@ -54,6 +76,7 @@ def _beat():
 
 def start(port, nuke_version, variant, script):
     global _thread
+    _prune_dead()
     update(pid=os.getpid(), port=port, nuke_version=nuke_version, variant=variant,
            script=script, addon_version=ADDON_VERSION, started=time.time())
     _stop.clear()

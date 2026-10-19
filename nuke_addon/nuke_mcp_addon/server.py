@@ -40,6 +40,40 @@ def call_main(func, *args):
     return func(*args)
 
 
+_script_callbacks_installed = globals().get("_script_callbacks_installed", False)
+
+
+def _refresh_script_name():
+    try:
+        name = get_nuke().root().name()
+    except Exception:
+        return
+    registry.update(script="" if name == "Root" else name)
+
+
+def _script_closed():
+    registry.update(script="")
+
+
+def _install_script_callbacks():
+    """Keep the instance registry's script name current without any command:
+    the addon starts from menu.py, before the script is loaded."""
+    global _script_callbacks_installed
+    if _script_callbacks_installed:
+        return
+    nuke = get_nuke()
+    for adder, fn in (("addOnScriptLoad", _refresh_script_name),
+                      ("addOnScriptSave", _refresh_script_name),
+                      ("addOnScriptClose", _script_closed)):
+        add = getattr(nuke, adder, None)
+        if add is not None:
+            try:
+                add(fn)
+            except Exception:
+                pass
+    _script_callbacks_installed = True
+
+
 def handshake_data(port):
     nuke = get_nuke()
     if nuke.env.get("studio"):
@@ -96,6 +130,7 @@ class NukeMCPServer:
             registry.start(self.port, hs["nuke_version"], hs["variant"], hs["script"])
         except Exception:
             registry.start(self.port, "", "", "")
+        _install_script_callbacks()
         self._thread = threading.Thread(target=self._accept_loop, name="nuke-mcp-accept",
                                         daemon=True)
         self._thread.start()
