@@ -133,7 +133,7 @@ def register(server: NukeMCPServer):
         return conn.send_command("auto_layout", params)
 
     @mcp.tool(annotations={"destructiveHint": True})
-    def execute_python(code: str, confirm: bool = False) -> dict:
+    def execute_python(code: str, confirm: bool = False, timeout_seconds: float = 120.0) -> dict:
         """Execute arbitrary Python code in Nuke's environment.
 
         This is a powerful but destructive tool. You must set confirm=True
@@ -143,6 +143,9 @@ def register(server: NukeMCPServer):
             code: Python code to execute. The `nuke` module is available.
                   Assign to `result` to return a value.
             confirm: Must be True to proceed.
+            timeout_seconds: How long to wait for the result. Raise it for bulk
+                  knob edits, solves, or anything else that keeps Nuke's main
+                  thread busy for a while.
         """
         if not confirm:
             return {
@@ -154,4 +157,4 @@ def register(server: NukeMCPServer):
                     "then call again with confirm=True."
                 ),
             }
-        return conn.send_command("execute_python", {"code": code})
+        return conn.send_command("execute_python", {"code": code}, timeout=timeout_seconds)
