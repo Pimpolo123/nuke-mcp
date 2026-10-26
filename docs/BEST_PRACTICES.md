@@ -98,7 +98,9 @@ Always check the project colorspace before creating Read/Write nodes. Ask: "What
 ## Client-Specific Setup
 
 ### Claude Code
-The `.mcp.json` in the repo root configures everything. Run Claude Code from the project directory.
+Register the real server once for your user:
+`claude mcp add --scope user nuke-mcp -- uv --directory /path/to/nuke-mcp run nuke-mcp`.
+The `.mcp.json` in the repo root only adds a mock server (`nuke-mcp-mock`) for development.
 
 ### Claude Desktop
 Add to your config (see README.md for the full JSON block).

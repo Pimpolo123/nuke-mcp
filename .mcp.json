@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "nuke-mcp": {
+    "nuke-mcp-mock": {
       "command": "uv",
       "args": ["run", "--directory", ".", "nuke-mcp", "--mock"]
     }

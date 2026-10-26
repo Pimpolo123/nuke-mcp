@@ -117,8 +117,11 @@ Upgrading from the single-file addon: delete `~/.nuke/nuke_mcp_addon.py` (the pa
 replaces it; old `menu.py` snippets keep working). In an open Nuke, run
 `nuke_mcp_addon.reload()` or call the `addon_reload` tool after copying the new files.
 
-**MCP client.** Claude Code picks up the included `.mcp.json` when run from the repo.
-Elsewhere (Claude Desktop, other clients):
+**MCP client.** The included `.mcp.json` only registers a mock server (`nuke-mcp-mock`,
+no Nuke needed) for working on this repo; its name differs from `nuke-mcp` so it never
+shadows a real registration. To drive a real Nuke, register the server in your client
+(Claude Code: `claude mcp add --scope user nuke-mcp -- uv --directory /path/to/nuke-mcp run nuke-mcp`;
+Claude Desktop and other clients):
 
 ```json
 {
